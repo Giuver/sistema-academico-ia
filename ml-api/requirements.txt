@@ -1,0 +1,39 @@
+# FastAPI y servidor
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+python-multipart
+python-dotenv
+
+# Machine Learning
+scikit-learn>=1.6.0
+xgboost>=2.1.0
+pandas>=2.2.0
+numpy>=2.1.0
+joblib>=1.4.0
+imbalanced-learn>=0.12.0
+
+# Data processing
+openpyxl
+xlrd
+
+# Reportes PDF
+reportlab
+Pillow
+
+# Supabase client
+supabase>=2.10.0
+
+# Validación y utilidades
+pydantic>=2.10.0
+pydantic-settings>=2.7.0
+email-validator
+
+# Utilidades
+aiofiles
+
+# Logging
+python-json-logger
+
+# Testing
+pytest
+pytest-asyncio

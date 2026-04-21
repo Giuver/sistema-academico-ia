@@ -1,0 +1,10 @@
+# Generación de datos
+faker==24.0.0
+pandas==2.2.1
+numpy==1.26.4
+
+# Supabase
+supabase==2.4.0
+
+# Utilidades
+python-dotenv==1.0.1
