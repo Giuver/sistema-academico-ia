@@ -9,6 +9,12 @@ const mlApi = axios.create({
   },
 })
 
+function buildApiUrl(path?: string | null) {
+  if (!path) return path
+  if (/^https?:\/\//i.test(path)) return path
+  return `${ML_API_URL.replace(/\/$/, '')}/${path.replace(/^\//, '')}`
+}
+
 // Tipos para las APIs
 export interface PrediccionRequest {
   estudiante_id: string
@@ -66,7 +72,10 @@ export const mlApiService = {
 
   async generarReporte(tipo: string, params: any): Promise<any> {
     const response = await mlApi.post(`/api/reportes/${tipo}`, params)
-    return response.data
+    return {
+      ...response.data,
+      url_descarga: buildApiUrl(response.data.url_descarga),
+    }
   },
 
   async obtenerMetricasModelo(): Promise<any[]> {

@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { supabase } from '@/services/supabase'
-import { Search, Filter, Download, Eye, Plus } from 'lucide-react'
+import { Search, Download, Eye, Plus } from 'lucide-react'
 import LoadingSpinner from '@/components/common/LoadingSpinner'
 import { EstudianteForm } from '@/components/forms/EstudianteForm'
 import { getNotaColor, cn } from '@/utils/helpers'
@@ -12,12 +12,13 @@ export default function EstudiantesPage() {
   const [gradoFilter, setGradoFilter] = useState<number | ''>('')
   const [showForm, setShowForm] = useState(false)
 
-  const { data: estudiantes, isLoading, refetch } = useQuery({
+  const { data: estudiantes, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['estudiantes', gradoFilter],
     queryFn: async () => {
       let query = supabase
-        .from('vista_estudiantes_resumen')
-        .select('*')
+        .from('estudiantes')
+        .select('id, codigo, nombres, apellidos, grado, seccion')
+        .eq('activo', true)
         .order('apellidos', { ascending: true })
 
       if (gradoFilter) {
@@ -27,7 +28,12 @@ export default function EstudiantesPage() {
       const { data, error } = await query
 
       if (error) throw error
-      return data
+      return (data || []).map((estudiante) => ({
+        ...estudiante,
+        promedio_general: null,
+        total_inasistencias: 0,
+        alertas_activas: 0,
+      }))
     }
   })
 
@@ -49,7 +55,7 @@ export default function EstudiantesPage() {
           <p className="text-gray-600">Gestión de estudiantes y rendimiento académico</p>
         </div>
         <div className="flex gap-2">
-          <button 
+          <button
             onClick={() => setShowForm(true)}
             className="btn-primary flex items-center gap-2"
           >
@@ -102,6 +108,11 @@ export default function EstudiantesPage() {
         {isLoading ? (
           <div className="p-8">
             <LoadingSpinner />
+          </div>
+        ) : isError ? (
+          <div className="p-8 text-center text-red-700 bg-red-50">
+            <p className="font-medium">No se pudo cargar la lista de estudiantes.</p>
+            <p className="text-sm mt-1">{(error as Error)?.message || 'Error desconocido'}</p>
           </div>
         ) : (
           <div className="overflow-x-auto">

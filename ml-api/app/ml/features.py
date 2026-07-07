@@ -16,41 +16,41 @@ logger = logging.getLogger(__name__)
 
 class FeatureEngineer:
     """Clase para ingeniería de características académicas"""
-    
+
     def __init__(self):
         self.supabase = get_supabase_client()
-    
+
     async def extraer_features_estudiante(
-        self, 
-        estudiante_id: str, 
+        self,
+        estudiante_id: str,
         periodo_id: Optional[str] = None
     ) -> Dict:
         """
         Extrae todas las características relevantes de un estudiante
         para predicción de rendimiento académico
-        
+
         Args:
             estudiante_id: ID del estudiante
             periodo_id: ID del periodo (opcional, usa el actual si no se especifica)
-        
+
         Returns:
             Diccionario con todas las features calculadas
         """
         try:
             # Obtener datos del estudiante
             estudiante = await self._obtener_datos_estudiante(estudiante_id)
-            
+
             # Obtener periodo actual si no se especifica
             if not periodo_id:
                 periodo_id = await self._obtener_periodo_activo()
-            
+
             # Extraer features por categoría
             features_notas = await self._features_notas(estudiante_id, periodo_id)
             features_asistencia = await self._features_asistencia(estudiante_id, periodo_id)
             features_conducta = await self._features_conducta(estudiante_id, periodo_id)
             features_demograficas = self._features_demograficas(estudiante)
             features_historicas = await self._features_historicas(estudiante_id, periodo_id)
-            
+
             # Combinar todas las features
             features = {
                 **features_notas,
@@ -59,28 +59,32 @@ class FeatureEngineer:
                 **features_demograficas,
                 **features_historicas
             }
-            
-            logger.info(f"✅ Features extraídas para estudiante {estudiante_id}: {len(features)} características")
+
+            logger.info(
+                f"✅ Features extraídas para estudiante {estudiante_id}: {len(features)} características")
             return features
-            
+
         except Exception as e:
-            logger.error(f"❌ Error extrayendo features para estudiante {estudiante_id}: {e}")
+            logger.error(
+                f"❌ Error extrayendo features para estudiante {estudiante_id}: {e}")
             raise
-    
+
     async def _obtener_datos_estudiante(self, estudiante_id: str) -> Dict:
         """Obtiene datos básicos del estudiante"""
-        response = self.supabase.table("estudiantes").select("*").eq("id", estudiante_id).execute()
+        response = self.supabase.table("estudiantes").select(
+            "*").eq("id", estudiante_id).execute()
         if not response.data:
             raise ValueError(f"Estudiante {estudiante_id} no encontrado")
         return response.data[0]
-    
+
     async def _obtener_periodo_activo(self) -> str:
         """Obtiene el ID del periodo activo actual"""
-        response = self.supabase.table("periodos").select("id").eq("activo", True).execute()
+        response = self.supabase.table("periodos").select(
+            "id").eq("activo", True).execute()
         if not response.data:
             raise ValueError("No hay periodo activo configurado")
         return response.data[0]["id"]
-    
+
     async def _features_notas(self, estudiante_id: str, periodo_id: str) -> Dict:
         """Extrae features relacionadas con notas"""
         # Obtener todas las notas del estudiante
@@ -88,7 +92,7 @@ class FeatureEngineer:
             .select("nota, curso_id, periodo_id") \
             .eq("estudiante_id", estudiante_id) \
             .execute()
-        
+
         if not response.data:
             return {
                 "promedio_actual": 0.0,
@@ -101,18 +105,21 @@ class FeatureEngineer:
                 "cursos_desaprobados": 0,
                 "porcentaje_aprobacion": 0.0
             }
-        
+
         df_notas = pd.DataFrame(response.data)
-        
+
         # Notas del periodo actual
         notas_actuales = df_notas[df_notas["periodo_id"] == periodo_id]["nota"]
-        
+
         # Notas de periodos anteriores
-        notas_anteriores = df_notas[df_notas["periodo_id"] != periodo_id]["nota"]
-        
-        promedio_actual = float(notas_actuales.mean()) if len(notas_actuales) > 0 else 0.0
-        promedio_anterior = float(notas_anteriores.mean()) if len(notas_anteriores) > 0 else 0.0
-        
+        notas_anteriores = df_notas[df_notas["periodo_id"]
+                                    != periodo_id]["nota"]
+
+        promedio_actual = float(notas_actuales.mean()) if len(
+            notas_actuales) > 0 else 0.0
+        promedio_anterior = float(notas_anteriores.mean()) if len(
+            notas_anteriores) > 0 else 0.0
+
         return {
             "promedio_actual": round(promedio_actual, 2),
             "promedio_anterior": round(promedio_anterior, 2),
@@ -124,7 +131,7 @@ class FeatureEngineer:
             "cursos_desaprobados": int((notas_actuales < 11).sum()) if len(notas_actuales) > 0 else 0,
             "porcentaje_aprobacion": round(float((notas_actuales >= 11).sum() / len(notas_actuales) * 100), 2) if len(notas_actuales) > 0 else 0.0
         }
-    
+
     async def _features_asistencia(self, estudiante_id: str, periodo_id: str) -> Dict:
         """Extrae features relacionadas con asistencia"""
         # Obtener periodo para calcular fechas
@@ -132,13 +139,13 @@ class FeatureEngineer:
             .select("fecha_inicio, fecha_fin") \
             .eq("id", periodo_id) \
             .execute()
-        
+
         if not response_periodo.data:
             return self._features_asistencia_default()
-        
+
         fecha_inicio = response_periodo.data[0]["fecha_inicio"]
         fecha_fin = response_periodo.data[0]["fecha_fin"]
-        
+
         # Obtener registros de asistencia
         response = self.supabase.table("asistencia") \
             .select("*") \
@@ -146,22 +153,23 @@ class FeatureEngineer:
             .gte("fecha", fecha_inicio) \
             .lte("fecha", fecha_fin) \
             .execute()
-        
+
         if not response.data:
             return self._features_asistencia_default()
-        
+
         df_asistencia = pd.DataFrame(response.data)
-        
+
         total_registros = len(df_asistencia)
         ausencias = len(df_asistencia[df_asistencia["estado"] == "ausente"])
         tardanzas = len(df_asistencia[df_asistencia["estado"] == "tardanza"])
         ausencias_injustificadas = len(df_asistencia[
-            (df_asistencia["estado"] == "ausente") & 
+            (df_asistencia["estado"] == "ausente") &
             (df_asistencia["justificado"] == False)
         ])
-        
-        tasa_asistencia = round((total_registros - ausencias) / total_registros * 100, 2) if total_registros > 0 else 100.0
-        
+
+        tasa_asistencia = round((total_registros - ausencias) /
+                                total_registros * 100, 2) if total_registros > 0 else 100.0
+
         return {
             "total_dias_registrados": total_registros,
             "total_ausencias": ausencias,
@@ -170,7 +178,7 @@ class FeatureEngineer:
             "tasa_asistencia": tasa_asistencia,
             "porcentaje_tardanzas": round(tardanzas / total_registros * 100, 2) if total_registros > 0 else 0.0
         }
-    
+
     def _features_asistencia_default(self) -> Dict:
         """Valores por defecto cuando no hay datos de asistencia"""
         return {
@@ -181,7 +189,7 @@ class FeatureEngineer:
             "tasa_asistencia": 100.0,
             "porcentaje_tardanzas": 0.0
         }
-    
+
     async def _features_conducta(self, estudiante_id: str, periodo_id: str) -> Dict:
         """Extrae features relacionadas con conducta"""
         response = self.supabase.table("conducta") \
@@ -189,46 +197,48 @@ class FeatureEngineer:
             .eq("estudiante_id", estudiante_id) \
             .eq("periodo_id", periodo_id) \
             .execute()
-        
+
         if not response.data:
             return {
                 "conducta_score": 0.75,  # Valor neutral por defecto
                 "tiene_incidencias": False
             }
-        
+
         conducta_data = response.data[0]
-        
+
         # Mapear calificación a score numérico
         score_map = {"AD": 1.0, "A": 0.85, "B": 0.70, "C": 0.50}
         score = score_map.get(conducta_data["calificacion"], 0.75)
-        
+
         return {
             "conducta_score": score,
             "tiene_incidencias": bool(conducta_data.get("incidencias"))
         }
-    
+
     def _features_demograficas(self, estudiante: Dict) -> Dict:
         """Extrae features demográficas del estudiante"""
         edad = self._calcular_edad(estudiante.get("fecha_nacimiento"))
-        
+
         return {
             "grado": estudiante["grado"],
             "edad": edad,
             "genero_m": 1 if estudiante.get("genero") == "M" else 0,
             "genero_f": 1 if estudiante.get("genero") == "F" else 0
         }
-    
+
     def _calcular_edad(self, fecha_nacimiento: Optional[str]) -> int:
         """Calcula edad del estudiante"""
         if not fecha_nacimiento:
             return 15  # Edad promedio por defecto
-        
+
         from datetime import datetime
-        nacimiento = datetime.fromisoformat(fecha_nacimiento.replace('Z', '+00:00'))
+        nacimiento = datetime.fromisoformat(
+            fecha_nacimiento.replace('Z', '+00:00'))
         hoy = datetime.now()
-        edad = hoy.year - nacimiento.year - ((hoy.month, hoy.day) < (nacimiento.month, nacimiento.day))
+        edad = hoy.year - nacimiento.year - \
+            ((hoy.month, hoy.day) < (nacimiento.month, nacimiento.day))
         return edad
-    
+
     async def _features_historicas(self, estudiante_id: str, periodo_id: str) -> Dict:
         """Features basadas en el historial académico completo"""
         # Contar alertas previas
@@ -236,19 +246,23 @@ class FeatureEngineer:
             .select("tipo, estado") \
             .eq("estudiante_id", estudiante_id) \
             .execute()
-        
-        total_alertas_previas = len(response_alertas.data) if response_alertas.data else 0
-        alertas_resueltas = len([a for a in response_alertas.data if a["estado"] == "resuelta"]) if response_alertas.data else 0
-        
+
+        total_alertas_previas = len(
+            response_alertas.data) if response_alertas.data else 0
+        alertas_resueltas = len(
+            [a for a in response_alertas.data if a["estado"] == "resuelta"]) if response_alertas.data else 0
+
         # Contar intervenciones
         response_intervenciones = self.supabase.table("intervenciones") \
             .select("resultado") \
             .eq("estudiante_id", estudiante_id) \
             .execute()
-        
-        total_intervenciones = len(response_intervenciones.data) if response_intervenciones.data else 0
-        intervenciones_exitosas = len([i for i in response_intervenciones.data if i["resultado"] == "exitosa"]) if response_intervenciones.data else 0
-        
+
+        total_intervenciones = len(
+            response_intervenciones.data) if response_intervenciones.data else 0
+        intervenciones_exitosas = len(
+            [i for i in response_intervenciones.data if i["resultado"] == "exitosa"]) if response_intervenciones.data else 0
+
         return {
             "total_alertas_previas": total_alertas_previas,
             "alertas_resueltas": alertas_resueltas,
@@ -256,14 +270,14 @@ class FeatureEngineer:
             "intervenciones_exitosas": intervenciones_exitosas,
             "tiene_historial_riesgo": total_alertas_previas > 0
         }
-    
+
     def preparar_features_para_modelo(self, features: Dict) -> pd.DataFrame:
         """
         Prepara las features en el formato requerido por el modelo
-        
+
         Args:
             features: Diccionario con features extraídas
-        
+
         Returns:
             DataFrame con features preparadas
         """
@@ -284,22 +298,22 @@ class FeatureEngineer:
             "total_alertas_previas",
             "tiene_historial_riesgo"
         ]
-        
+
         # Crear DataFrame con las features en el orden correcto
         df = pd.DataFrame([features])
-        
+
         # Asegurar que todas las columnas existen
         for col in feature_columns:
             if col not in df.columns:
                 df[col] = 0
-        
+
         # Seleccionar solo las columnas necesarias en el orden correcto
         df = df[feature_columns]
-        
+
         # Convertir booleanos a int
         bool_cols = ["tiene_incidencias", "tiene_historial_riesgo"]
         for col in bool_cols:
             if col in df.columns:
                 df[col] = df[col].astype(int)
-        
+
         return df

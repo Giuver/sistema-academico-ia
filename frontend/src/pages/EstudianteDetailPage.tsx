@@ -60,7 +60,7 @@ export default function EstudianteDetailPage() {
 
   const handlePredecir = async () => {
     if (!id) return
-    
+
     setLoadingPrediccion(true)
     try {
       const result = await mlApiService.predecir({

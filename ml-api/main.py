@@ -29,15 +29,15 @@ async def lifespan(app: FastAPI):
     logger.info("🚀 Iniciando Sistema de Análisis Académico - ML API")
     logger.info(f"📊 Versión: {settings.api_version}")
     logger.info(f"🔗 Supabase URL: {settings.supabase_url}")
-    
+
     # Crear directorios necesarios
     import os
     os.makedirs(settings.model_path, exist_ok=True)
     os.makedirs(settings.reports_output_dir, exist_ok=True)
     logger.info("✅ Directorios creados correctamente")
-    
+
     yield
-    
+
     # Shutdown
     logger.info("👋 Cerrando aplicación...")
 
@@ -65,6 +65,7 @@ app.add_middleware(
 # RUTAS PRINCIPALES
 # ================================================
 
+
 @app.get("/")
 async def root():
     """Endpoint raíz - Información de la API"""
@@ -91,7 +92,7 @@ async def health_check():
         # Verificar conexión a Supabase (básico)
         from app.utils.supabase_client import get_supabase_client
         client = get_supabase_client()
-        
+
         return {
             "status": "healthy",
             "timestamp": datetime.now().isoformat(),
@@ -171,7 +172,7 @@ async def general_exception_handler(request, exc):
 
 if __name__ == "__main__":
     import uvicorn
-    
+
     uvicorn.run(
         "main:app",
         host=settings.api_host,

@@ -76,12 +76,12 @@ export default function ReportesPage() {
           return (
             <div key={reporte.id} className="card hover:shadow-lg transition-shadow">
               <div className={`w-full h-2 rounded-t-lg bg-gradient-to-r ${reporte.color} -mt-6 mb-4`} />
-              
+
               <div className="flex items-start gap-4">
                 <div className={`p-3 rounded-lg bg-gradient-to-br ${reporte.color}`}>
                   <Icon className="w-8 h-8 text-white" />
                 </div>
-                
+
                 <div className="flex-1">
                   <h3 className="font-semibold text-lg text-gray-900 mb-1">
                     {reporte.nombre}
@@ -89,7 +89,7 @@ export default function ReportesPage() {
                   <p className="text-sm text-gray-600 mb-4">
                     {reporte.descripcion}
                   </p>
-                  
+
                   <button
                     onClick={() => handleGenerarReporte(reporte.id)}
                     disabled={generando}

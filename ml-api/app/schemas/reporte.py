@@ -26,12 +26,16 @@ class TipoReporte(str, Enum):
 
 class ReporteEstudiantesRiesgoRequest(BaseModel):
     """Request para reporte de estudiantes en riesgo"""
-    nivel_riesgo: Optional[List[str]] = Field(None, description="Filtrar por nivel: ['critica', 'moderada', 'preventiva']")
-    grado: Optional[int] = Field(None, ge=1, le=5, description="Filtrar por grado")
+    nivel_riesgo: Optional[List[str]] = Field(
+        None, description="Filtrar por nivel: ['critica', 'moderada', 'preventiva']")
+    grado: Optional[int] = Field(
+        None, ge=1, le=5, description="Filtrar por grado")
     seccion: Optional[str] = Field(None, description="Filtrar por sección")
-    incluir_recomendaciones: bool = Field(True, description="Incluir recomendaciones en el reporte")
-    formato: FormatoReporte = Field(FormatoReporte.PDF, description="Formato del reporte")
-    
+    incluir_recomendaciones: bool = Field(
+        True, description="Incluir recomendaciones en el reporte")
+    formato: FormatoReporte = Field(
+        FormatoReporte.PDF, description="Formato del reporte")
+
     class Config:
         json_schema_extra = {
             "example": {
@@ -46,11 +50,13 @@ class ReporteEstudiantesRiesgoRequest(BaseModel):
 
 class ReporteAnalisisPeriodoRequest(BaseModel):
     """Request para análisis comparativo de periodos"""
-    periodo_ids: List[UUID4] = Field(..., description="IDs de periodos a comparar")
+    periodo_ids: List[UUID4] = Field(...,
+                                     description="IDs de periodos a comparar")
     grado: Optional[int] = Field(None, ge=1, le=5)
-    incluir_graficos: bool = Field(True, description="Incluir gráficos estadísticos")
+    incluir_graficos: bool = Field(
+        True, description="Incluir gráficos estadísticos")
     formato: FormatoReporte = Field(FormatoReporte.EXCEL)
-    
+
     class Config:
         json_schema_extra = {
             "example": {
@@ -67,11 +73,14 @@ class ReporteAnalisisPeriodoRequest(BaseModel):
 
 class ReporteIntervencionesRequest(BaseModel):
     """Request para reporte de efectividad de intervenciones"""
-    fecha_inicio: date = Field(..., description="Fecha de inicio del periodo de análisis")
-    fecha_fin: date = Field(..., description="Fecha de fin del periodo de análisis")
-    tipo_intervencion: Optional[str] = Field(None, description="Filtrar por tipo de intervención")
+    fecha_inicio: date = Field(...,
+                               description="Fecha de inicio del periodo de análisis")
+    fecha_fin: date = Field(...,
+                            description="Fecha de fin del periodo de análisis")
+    tipo_intervencion: Optional[str] = Field(
+        None, description="Filtrar por tipo de intervención")
     formato: FormatoReporte = Field(FormatoReporte.PDF)
-    
+
     class Config:
         json_schema_extra = {
             "example": {
@@ -92,7 +101,7 @@ class ReporteResponse(BaseModel):
     contenido_base64: Optional[str] = None  # Para respuestas directas
     metadata: dict = Field(default_factory=dict)
     generado_en: str = Field(..., description="Timestamp de generación")
-    
+
     class Config:
         json_schema_extra = {
             "example": {
@@ -115,5 +124,6 @@ class ReporteResponse(BaseModel):
 class ResumenInstitucionalRequest(BaseModel):
     """Request para resumen institucional"""
     periodo_id: UUID4 = Field(..., description="ID del periodo a analizar")
-    incluir_comparativas: bool = Field(True, description="Incluir comparativas con periodos anteriores")
+    incluir_comparativas: bool = Field(
+        True, description="Incluir comparativas con periodos anteriores")
     formato: FormatoReporte = Field(FormatoReporte.PDF)
