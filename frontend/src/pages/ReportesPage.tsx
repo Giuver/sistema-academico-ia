@@ -6,6 +6,7 @@ import LoadingSpinner from '@/components/common/LoadingSpinner'
 export default function ReportesPage() {
   const [generando, setGenerando] = useState(false)
   const [reporteGenerado, setReporteGenerado] = useState<any>(null)
+  const [errorReporte, setErrorReporte] = useState<string | null>(null)
 
   const tiposReporte = [
     {
@@ -41,18 +42,48 @@ export default function ReportesPage() {
   const handleGenerarReporte = async (tipo: string) => {
     setGenerando(true)
     setReporteGenerado(null)
+    setErrorReporte(null)
 
     try {
-      const params = {
-        formato: 'pdf',
-        incluir_recomendaciones: true
+      const hoy = new Date()
+      const hace90Dias = new Date()
+      hace90Dias.setDate(hoy.getDate() - 90)
+
+      let params: Record<string, any> = { formato: 'pdf' }
+
+      if (tipo === 'estudiantes-riesgo') {
+        params = {
+          formato: 'pdf',
+          incluir_recomendaciones: true,
+        }
+      } else if (tipo === 'analisis-periodo') {
+        params = {
+          formato: 'pdf',
+          incluir_graficos: true,
+        }
+      } else if (tipo === 'efectividad-intervenciones') {
+        params = {
+          formato: 'pdf',
+          fecha_inicio: hace90Dias.toISOString().slice(0, 10),
+          fecha_fin: hoy.toISOString().slice(0, 10),
+        }
+      } else if (tipo === 'resumen-institucional') {
+        params = {
+          formato: 'pdf',
+          incluir_comparativas: true,
+        }
       }
 
       const resultado = await mlApiService.generarReporte(tipo, params)
       setReporteGenerado(resultado)
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error generando reporte:', error)
-      alert('Error al generar el reporte')
+      const detalle =
+        error?.response?.data?.detail ||
+        error?.response?.data?.error ||
+        error?.message ||
+        'Error al generar el reporte'
+      setErrorReporte(String(detalle))
     } finally {
       setGenerando(false)
     }
@@ -138,6 +169,13 @@ export default function ReportesPage() {
               )}
             </div>
           </div>
+        </div>
+      )}
+
+      {errorReporte && (
+        <div className="card bg-red-50 border-red-200">
+          <h3 className="font-semibold text-red-900 mb-1">Error al generar reporte</h3>
+          <p className="text-sm text-red-700">{errorReporte}</p>
         </div>
       )}
 

@@ -7,6 +7,82 @@ import LoadingSpinner from '@/components/common/LoadingSpinner'
 import { EstudianteForm } from '@/components/forms/EstudianteForm'
 import { getNotaColor, cn } from '@/utils/helpers'
 
+const PAGE_SIZE = 1000
+const STUDENT_CHUNK_SIZE = 50
+
+type EstudianteBase = {
+  id: string
+  codigo: string
+  nombres: string
+  apellidos: string
+  grado: number
+  seccion: string
+}
+
+type MetricasEstudiante = {
+  promedio_general: number | null
+  total_inasistencias: number
+  alertas_activas: number
+}
+
+async function fetchAllRows<T>(
+  table: string,
+  select: string,
+  applyFilters?: (query: any) => any
+): Promise<T[]> {
+  let page = 0
+  let allRows: T[] = []
+
+  while (true) {
+    let query = supabase
+      .from(table as any)
+      .select(select)
+      .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1)
+
+    if (applyFilters) {
+      query = applyFilters(query)
+    }
+
+    const { data, error } = await query
+    if (error) throw error
+
+    const rows = (data || []) as T[]
+    allRows = [...allRows, ...rows]
+
+    if (rows.length < PAGE_SIZE) break
+    page += 1
+  }
+
+  return allRows
+}
+
+function chunkArray<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = []
+
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size))
+  }
+
+  return chunks
+}
+
+async function fetchRowsForStudentIds<T>(
+  table: string,
+  select: string,
+  studentIds: string[],
+  applyFilters?: (query: any) => any
+): Promise<T[]> {
+  const chunks = chunkArray(studentIds, STUDENT_CHUNK_SIZE)
+  const results = await Promise.all(chunks.map((ids) =>
+    fetchAllRows<T>(table, select, (query) => {
+      const filteredQuery = query.in('estudiante_id', ids)
+      return applyFilters ? applyFilters(filteredQuery) : filteredQuery
+    })
+  ))
+
+  return results.flat()
+}
+
 export default function EstudiantesPage() {
   const [searchTerm, setSearchTerm] = useState('')
   const [gradoFilter, setGradoFilter] = useState<number | ''>('')
@@ -28,16 +104,85 @@ export default function EstudiantesPage() {
       const { data, error } = await query
 
       if (error) throw error
-      return (data || []).map((estudiante) => ({
-        ...estudiante,
-        promedio_general: null,
-        total_inasistencias: 0,
-        alertas_activas: 0,
-      }))
+      return (data || []) as EstudianteBase[]
     }
   })
 
-  const filteredEstudiantes = estudiantes?.filter(e =>
+  const { data: metricas, isLoading: isLoadingMetricas } = useQuery({
+    queryKey: ['estudiantes-metricas', gradoFilter, estudiantes?.map((estudiante) => estudiante.id).join(',')],
+    enabled: !!estudiantes?.length,
+    queryFn: async () => {
+      const estudiantesBase = estudiantes || []
+      const estudianteIds = estudiantesBase.map((estudiante) => estudiante.id)
+      const estudiantesIds = new Set(estudianteIds)
+
+      const [notas, inasistencias, alertas] = await Promise.all([
+        fetchRowsForStudentIds<{ estudiante_id: string; nota: number }>(
+          'notas',
+          'estudiante_id, nota',
+          estudianteIds
+        ),
+        fetchRowsForStudentIds<{ estudiante_id: string }>('asistencia', 'estudiante_id', estudianteIds, (query) =>
+          query.eq('estado', 'ausente')
+        ),
+        fetchRowsForStudentIds<{ estudiante_id: string }>('alertas', 'estudiante_id', estudianteIds, (query) =>
+          query.in('estado', ['activa', 'en_atencion'])
+        ),
+      ])
+
+      const notasPorEstudiante = new Map<string, { suma: number; total: number }>()
+      const inasistenciasPorEstudiante = new Map<string, number>()
+      const alertasPorEstudiante = new Map<string, number>()
+
+      notas.forEach((nota) => {
+        if (!estudiantesIds.has(nota.estudiante_id)) return
+        const actual = notasPorEstudiante.get(nota.estudiante_id) || { suma: 0, total: 0 }
+        notasPorEstudiante.set(nota.estudiante_id, {
+          suma: actual.suma + Number(nota.nota || 0),
+          total: actual.total + 1,
+        })
+      })
+
+      inasistencias.forEach((asistencia) => {
+        if (!estudiantesIds.has(asistencia.estudiante_id)) return
+        inasistenciasPorEstudiante.set(
+          asistencia.estudiante_id,
+          (inasistenciasPorEstudiante.get(asistencia.estudiante_id) || 0) + 1
+        )
+      })
+
+      alertas.forEach((alerta) => {
+        if (!estudiantesIds.has(alerta.estudiante_id)) return
+        alertasPorEstudiante.set(
+          alerta.estudiante_id,
+          (alertasPorEstudiante.get(alerta.estudiante_id) || 0) + 1
+        )
+      })
+
+      return estudiantesBase.reduce<Record<string, MetricasEstudiante>>((acc, estudiante) => {
+        const notasEstudiante = notasPorEstudiante.get(estudiante.id)
+        acc[estudiante.id] = {
+          promedio_general: notasEstudiante && notasEstudiante.total > 0
+            ? notasEstudiante.suma / notasEstudiante.total
+            : null,
+          total_inasistencias: inasistenciasPorEstudiante.get(estudiante.id) || 0,
+          alertas_activas: alertasPorEstudiante.get(estudiante.id) || 0,
+        }
+        return acc
+      }, {})
+    }
+  })
+
+  const estudiantesConMetricas = estudiantes?.map((estudiante) => ({
+    ...estudiante,
+    ...(metricas?.[estudiante.id] || {
+      promedio_general: null,
+      total_inasistencias: 0,
+      alertas_activas: 0,
+    }),
+  }))
+
+  const filteredEstudiantes = estudiantesConMetricas?.filter(e =>
     `${e.nombres} ${e.apellidos} ${e.codigo}`.toLowerCase().includes(searchTerm.toLowerCase())
   )
 
@@ -157,7 +302,9 @@ export default function EstudiantesPage() {
                       {estudiante.grado}° {estudiante.seccion}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      {estudiante.promedio_general !== null ? (
+                      {isLoadingMetricas ? (
+                        <span className="text-sm text-gray-400 italic">Calculando...</span>
+                      ) : estudiante.promedio_general !== null ? (
                         <span className={cn('text-sm font-semibold', getNotaColor(estudiante.promedio_general))}>
                           {estudiante.promedio_general.toFixed(2)}
                         </span>
@@ -166,7 +313,11 @@ export default function EstudiantesPage() {
                       )}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                      {estudiante.total_inasistencias || 0}
+                      {isLoadingMetricas ? (
+                        <span className="text-gray-400 italic">Calculando...</span>
+                      ) : (
+                        estudiante.total_inasistencias || 0
+                      )}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       {(estudiante.alertas_activas || 0) > 0 ? (

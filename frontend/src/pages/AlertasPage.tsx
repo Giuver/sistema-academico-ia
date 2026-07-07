@@ -7,7 +7,7 @@ import { supabase } from '@/services/supabase'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 
 export default function AlertasPage() {
-  const { alertas, isLoading } = useAlertas()
+  const { alertas, isLoading, isError, error } = useAlertas()
   const [tipoFilter, setTipoFilter] = useState<string>('')
   const [estadoFilter, setEstadoFilter] = useState<string>('')
   const queryClient = useQueryClient()
@@ -20,19 +20,48 @@ export default function AlertasPage() {
 
   const cambiarEstadoMutation = useMutation({
     mutationFn: async ({ alertaId, nuevoEstado }: { alertaId: string, nuevoEstado: string }) => {
-      const { error } = await supabase
+      const payload = {
+        estado: nuevoEstado,
+        fecha_atencion: nuevoEstado === 'en_atencion' ? new Date().toISOString() : null,
+        fecha_resolucion: nuevoEstado === 'resuelta' ? new Date().toISOString() : null
+      }
+
+      const { data, error } = await supabase
         .from('alertas')
-        .update({ 
-          estado: nuevoEstado,
-          fecha_atencion: nuevoEstado === 'en_atencion' ? new Date().toISOString() : undefined,
-          fecha_resolucion: nuevoEstado === 'resuelta' ? new Date().toISOString() : undefined
-        })
+        .update(payload)
         .eq('id', alertaId)
+        .select('id, estado')
 
       if (error) throw error
+      if (!data || data.length === 0) {
+        throw new Error('No tienes permisos para cambiar esta alerta o ya no existe.')
+      }
+
+      return { alertaId, nuevoEstado }
     },
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
+      queryClient.setQueryData(['alertas'], (prev: any[] | undefined) => {
+        if (!prev) return prev
+
+        const nowIso = new Date().toISOString()
+        return prev.map((alerta) =>
+          alerta.id === variables.alertaId
+            ? {
+                ...alerta,
+                estado: variables.nuevoEstado,
+                fecha_atencion:
+                  variables.nuevoEstado === 'en_atencion' ? nowIso : alerta.fecha_atencion,
+                fecha_resolucion:
+                  variables.nuevoEstado === 'resuelta' ? nowIso : alerta.fecha_resolucion,
+              }
+            : alerta
+        )
+      })
       queryClient.invalidateQueries({ queryKey: ['alertas'] })
+    },
+    onError: (error) => {
+      const mensaje = error instanceof Error ? error.message : 'No se pudo cambiar el estado'
+      window.alert(`Error al cambiar estado: ${mensaje}`)
     }
   })
 
@@ -118,6 +147,13 @@ export default function AlertasPage() {
           <div className="card">
             <LoadingSpinner />
           </div>
+        ) : isError ? (
+          <div className="card text-center py-8">
+            <p className="text-red-700 font-medium">No se pudo cargar alertas.</p>
+            <p className="text-sm text-red-600 mt-1">
+              {(error as Error)?.message || 'Error desconocido'}
+            </p>
+          </div>
         ) : alertasFiltradas && alertasFiltradas.length > 0 ? (
           alertasFiltradas.map(alerta => (
             <div key={alerta.id} className="card hover:shadow-md transition-shadow">
@@ -143,7 +179,9 @@ export default function AlertasPage() {
                   <p className="text-sm text-gray-600 mb-2">
                     {alerta.grado}° {alerta.seccion} • {alerta.categoria}
                   </p>
-                  <p className="text-gray-700">{alerta.motivo}</p>
+                  <p className="text-gray-700">
+                    {alerta.motivo_actualizado || alerta.motivo}
+                  </p>
 
                   <div className="mt-3 flex items-center gap-4 text-sm text-gray-500">
                     <span className="flex items-center gap-1">

@@ -9,6 +9,8 @@ import logging
 from datetime import datetime
 import os
 from typing import Any, List
+from datetime import date, timedelta
+from collections import Counter
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
@@ -39,7 +41,16 @@ async def descargar_reporte(nombre_archivo: str):
     if not os.path.exists(filepath):
         raise HTTPException(status_code=404, detail="Reporte no encontrado")
 
-    return FileResponse(filepath, media_type="application/pdf", filename=safe_name)
+    _, extension = os.path.splitext(safe_name.lower())
+    media_type = (
+        "application/pdf"
+        if extension == ".pdf"
+        else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        if extension == ".xlsx"
+        else "application/octet-stream"
+    )
+
+    return FileResponse(filepath, media_type=media_type, filename=safe_name)
 
 
 @router.post("/estudiantes-riesgo", response_model=ReporteResponse)
@@ -129,16 +140,28 @@ async def generar_reporte_analisis_periodo(request: ReporteAnalisisPeriodoReques
         supabase = get_supabase_client()
 
         datos_periodos = []
+        periodo_ids = list(request.periodo_ids) if request.periodo_ids else []
 
-        for periodo_id in request.periodo_ids:
-            # Obtener resumen del periodo
-            response = supabase.table("vista_rendimiento_curso") \
-                .select("*") \
-                .eq("periodo_id", str(periodo_id)) \
-                .execute()
+        if not periodo_ids:
+            periodos_resp = supabase.table("periodos").select("id").order("fecha_inicio", desc=True).limit(2).execute()
+            periodo_ids = [p.get("id") for p in (periodos_resp.data or []) if p.get("id")]
+
+        for periodo_id in periodo_ids:
+            periodo_info = supabase.table("periodos").select("id, nombre, anio").eq("id", str(periodo_id)).limit(1).execute()
+            periodo_row = (periodo_info.data or [{}])[0]
+
+            # Obtener resumen del periodo filtrando por campos existentes en la vista
+            query = supabase.table("vista_rendimiento_curso").select("*")
+            if periodo_row.get("nombre"):
+                query = query.eq("periodo", periodo_row.get("nombre"))
+            if periodo_row.get("anio"):
+                query = query.eq("anio", periodo_row.get("anio"))
+
+            response = query.execute()
 
             datos_periodos.append({
                 "periodo_id": str(periodo_id),
+                "periodo_nombre": periodo_row.get("nombre", "Periodo"),
                 "datos": response.data if response.data else []
             })
 
@@ -151,8 +174,8 @@ async def generar_reporte_analisis_periodo(request: ReporteAnalisisPeriodoReques
             tipo_reporte=TipoReporte.ANALISIS_PERIODO,
             formato=request.formato,
             nombre_archivo=nombre_archivo,
-            url_descarga=f"/{settings.reports_output_dir}/{nombre_archivo}",
-            metadata={"periodos_analizados": len(request.periodo_ids)},
+            url_descarga=f"/api/reportes/descargar/{nombre_archivo}",
+            metadata={"periodos_analizados": len(periodo_ids)},
             generado_en=datetime.now().isoformat()
         )
 
@@ -183,9 +206,12 @@ async def generar_reporte_intervenciones(request: ReporteIntervencionesRequest):
         from app.utils.supabase_client import get_supabase_client
         supabase = get_supabase_client()
 
+        fecha_fin = request.fecha_fin or date.today()
+        fecha_inicio = request.fecha_inicio or (fecha_fin - timedelta(days=90))
+
         query = supabase.table("intervenciones").select("*") \
-            .gte("fecha_inicio", str(request.fecha_inicio)) \
-            .lte("fecha_inicio", str(request.fecha_fin))
+            .gte("fecha_inicio", str(fecha_inicio)) \
+            .lte("fecha_inicio", str(fecha_fin))
 
         if request.tipo_intervencion:
             query = query.eq("tipo_intervencion", request.tipo_intervencion)
@@ -207,7 +233,7 @@ async def generar_reporte_intervenciones(request: ReporteIntervencionesRequest):
             tipo_reporte=TipoReporte.EFECTIVIDAD_INTERVENCIONES,
             formato=request.formato,
             nombre_archivo=nombre_archivo,
-            url_descarga=f"/{settings.reports_output_dir}/{nombre_archivo}",
+            url_descarga=f"/api/reportes/descargar/{nombre_archivo}",
             metadata={
                 "total_intervenciones": total,
                 "exitosas": exitosas,
@@ -245,17 +271,21 @@ async def generar_resumen_institucional(request: ResumenInstitucionalRequest):
         from app.utils.supabase_client import get_supabase_client
         supabase = get_supabase_client()
 
-        # Obtener KPIs del periodo
-        response = supabase.table(
-            "vista_estudiantes_resumen").select("*").execute()
+        # KPIs ligeros para evitar timeout de vistas pesadas
+        estudiantes_resp = supabase.table("estudiantes").select("id", count="exact").eq("activo", True).limit(1).execute()
+        alertas_resp = supabase.table("alertas").select("id", count="exact").in_("estado", ["activa", "en_atencion"]).limit(1).execute()
+        notas_resp = supabase.table("notas").select("nota").limit(5000).execute()
 
-        datos = response.data if response.data else []
+        total_estudiantes = estudiantes_resp.count or 0
+        total_alertas = alertas_resp.count or 0
+        notas = [float(n.get("nota", 0)) for n in (notas_resp.data or []) if n.get("nota") is not None]
+        promedio_general = (sum(notas) / len(notas)) if notas else 0
 
-        # Calcular KPIs
-        total_estudiantes = len(datos)
-        promedio_general = sum(d.get("promedio_general", 0)
-                               for d in datos) / total_estudiantes if total_estudiantes > 0 else 0
-        total_alertas = sum(d.get("alertas_activas", 0) for d in datos)
+        datos = [{
+            "total_estudiantes": total_estudiantes,
+            "promedio_general": round(promedio_general, 2),
+            "alertas_activas": total_alertas
+        }]
 
         nombre_archivo = await _generar_pdf_resumen_institucional(datos, request)
 
@@ -263,7 +293,7 @@ async def generar_resumen_institucional(request: ResumenInstitucionalRequest):
             tipo_reporte=TipoReporte.RESUMEN_INSTITUCIONAL,
             formato=request.formato,
             nombre_archivo=nombre_archivo,
-            url_descarga=f"/{settings.reports_output_dir}/{nombre_archivo}",
+            url_descarga=f"/api/reportes/descargar/{nombre_archivo}",
             metadata={
                 "total_estudiantes": total_estudiantes,
                 "promedio_general": round(promedio_general, 2),
@@ -292,11 +322,15 @@ async def _generar_pdf_estudiantes_riesgo(datos: list, request) -> str:
     filepath = os.path.join(settings.reports_output_dir, nombre_archivo)
 
     os.makedirs(settings.reports_output_dir, exist_ok=True)
+    tipos_count = Counter(d.get("tipo", "sin_tipo") for d in datos)
+    grados_count = Counter(f"{d.get('grado', '-')}{d.get('seccion', '')}" for d in datos)
+
     rows = [
         [
             d.get("estudiante_nombre", "Sin nombre"),
             f"{d.get('grado', '-')}{d.get('seccion', '')}",
             d.get("tipo", "-"),
+            f"{float(d.get('nivel_riesgo', 0)) * 100:.1f}%" if d.get("nivel_riesgo") is not None else "-",
             d.get("motivo", "-"),
         ]
         for d in datos
@@ -304,12 +338,15 @@ async def _generar_pdf_estudiantes_riesgo(datos: list, request) -> str:
 
     _crear_pdf(
         filepath,
-        "Reporte de Estudiantes en Riesgo",
+        "Reporte Detallado de Estudiantes en Riesgo",
         [
             f"Generado: {datetime.now().strftime('%d/%m/%Y %H:%M')}",
             f"Total de alertas activas: {len(datos)}",
+            f"Criticas: {tipos_count.get('critica', 0)} | Moderadas: {tipos_count.get('moderada', 0)} | Preventivas: {tipos_count.get('preventiva', 0)}",
+            "Este reporte resume estudiantes con riesgo academico detectado por el sistema y explica el motivo principal de cada alerta.",
+            f"Grados con mayor carga de riesgo: {', '.join([f'{g}: {c}' for g, c in grados_count.most_common(5)]) or 'Sin datos'}",
         ],
-        ["Estudiante", "Grado", "Tipo", "Motivo"],
+        ["Estudiante", "Grado", "Tipo", "Nivel riesgo", "Motivo detallado"],
         rows,
     )
 
@@ -327,7 +364,8 @@ def _crear_pdf(filepath: str, titulo: str, resumen: List[str], headers: List[str
         content.append(Paragraph(str(item), styles["Normal"]))
     content.append(Spacer(1, 12))
 
-    table_data = [headers] + [[str(value)[:90] for value in row] for row in rows[:100]]
+    table_data = [headers] + [[str(value)[:90]
+                               for value in row] for row in rows[:100]]
     if len(table_data) == 1:
         table_data.append(["Sin datos"] + [""] * (len(headers) - 1))
 
@@ -376,22 +414,105 @@ async def _generar_pdf_analisis_periodo(datos: list, request) -> str:
     """Genera PDF de análisis de periodo"""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     nombre_archivo = f"analisis_periodo_{timestamp}.pdf"
+    filepath = os.path.join(settings.reports_output_dir, nombre_archivo)
+    os.makedirs(settings.reports_output_dir, exist_ok=True)
+
+    filas = []
+    for periodo in datos:
+        filas.append([
+            periodo.get("periodo_nombre", periodo.get("periodo_id", "-")),
+            len(periodo.get("datos", []))
+        ])
+
+    _crear_pdf(
+        filepath,
+        "Reporte de Analisis de Periodo",
+        [
+            f"Generado: {datetime.now().strftime('%d/%m/%Y %H:%M')}",
+            f"Periodos analizados: {len(datos)}",
+        ],
+        ["Periodo", "Registros"],
+        filas,
+    )
+
     return nombre_archivo
 
 
 async def _generar_pdf_intervenciones(datos: list, request) -> str:
     """Genera PDF de intervenciones"""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return f"intervenciones_{timestamp}.pdf"
+    nombre_archivo = f"intervenciones_{timestamp}.pdf"
+    filepath = os.path.join(settings.reports_output_dir, nombre_archivo)
+    os.makedirs(settings.reports_output_dir, exist_ok=True)
+
+    filas = [
+        [
+            d.get("tipo_intervencion", "-"),
+            d.get("resultado", "-"),
+            d.get("fecha_inicio", "-"),
+        ]
+        for d in datos
+    ]
+
+    _crear_pdf(
+        filepath,
+        "Reporte de Efectividad de Intervenciones",
+        [
+            f"Generado: {datetime.now().strftime('%d/%m/%Y %H:%M')}",
+            f"Total intervenciones: {len(datos)}",
+        ],
+        ["Tipo", "Resultado", "Fecha inicio"],
+        filas,
+    )
+
+    return nombre_archivo
 
 
 async def _generar_excel_intervenciones(datos: list, request) -> str:
     """Genera Excel de intervenciones"""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return f"intervenciones_{timestamp}.xlsx"
+    nombre_archivo = f"intervenciones_{timestamp}.xlsx"
+    filepath = os.path.join(settings.reports_output_dir, nombre_archivo)
+    os.makedirs(settings.reports_output_dir, exist_ok=True)
+    with open(filepath, 'w') as f:
+        f.write("Excel placeholder")
+    return nombre_archivo
 
 
 async def _generar_pdf_resumen_institucional(datos: list, request) -> str:
     """Genera PDF de resumen institucional"""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return f"resumen_institucional_{timestamp}.pdf"
+    nombre_archivo = f"resumen_institucional_{timestamp}.pdf"
+    filepath = os.path.join(settings.reports_output_dir, nombre_archivo)
+    os.makedirs(settings.reports_output_dir, exist_ok=True)
+
+    if len(datos) == 1 and "total_estudiantes" in datos[0]:
+        total_estudiantes = int(datos[0].get("total_estudiantes", 0))
+        promedio_general = float(datos[0].get("promedio_general", 0))
+        total_alertas = int(datos[0].get("alertas_activas", 0))
+    else:
+        total_estudiantes = len(datos)
+        promedio_general = (
+            sum(d.get("promedio_general", 0) for d in datos) / len(datos)
+            if datos else 0
+        )
+        total_alertas = sum(d.get("alertas_activas", 0) for d in datos)
+
+    _crear_pdf(
+        filepath,
+        "Resumen Institucional",
+        [
+            f"Generado: {datetime.now().strftime('%d/%m/%Y %H:%M')}",
+            f"Total estudiantes: {total_estudiantes}",
+            f"Promedio general: {round(promedio_general, 2)}",
+            f"Alertas activas: {total_alertas}",
+        ],
+        ["Indicador", "Valor"],
+        [
+            ["Total estudiantes", total_estudiantes],
+            ["Promedio general", round(promedio_general, 2)],
+            ["Alertas activas", total_alertas],
+        ],
+    )
+
+    return nombre_archivo

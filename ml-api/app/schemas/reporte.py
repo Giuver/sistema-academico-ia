@@ -50,8 +50,8 @@ class ReporteEstudiantesRiesgoRequest(BaseModel):
 
 class ReporteAnalisisPeriodoRequest(BaseModel):
     """Request para análisis comparativo de periodos"""
-    periodo_ids: List[UUID4] = Field(...,
-                                     description="IDs de periodos a comparar")
+    periodo_ids: Optional[List[UUID4]] = Field(
+        None, description="IDs de periodos a comparar")
     grado: Optional[int] = Field(None, ge=1, le=5)
     incluir_graficos: bool = Field(
         True, description="Incluir gráficos estadísticos")
@@ -73,10 +73,10 @@ class ReporteAnalisisPeriodoRequest(BaseModel):
 
 class ReporteIntervencionesRequest(BaseModel):
     """Request para reporte de efectividad de intervenciones"""
-    fecha_inicio: date = Field(...,
-                               description="Fecha de inicio del periodo de análisis")
-    fecha_fin: date = Field(...,
-                            description="Fecha de fin del periodo de análisis")
+    fecha_inicio: Optional[date] = Field(
+        None, description="Fecha de inicio del periodo de análisis")
+    fecha_fin: Optional[date] = Field(
+        None, description="Fecha de fin del periodo de análisis")
     tipo_intervencion: Optional[str] = Field(
         None, description="Filtrar por tipo de intervención")
     formato: FormatoReporte = Field(FormatoReporte.PDF)
@@ -123,7 +123,7 @@ class ReporteResponse(BaseModel):
 
 class ResumenInstitucionalRequest(BaseModel):
     """Request para resumen institucional"""
-    periodo_id: UUID4 = Field(..., description="ID del periodo a analizar")
+    periodo_id: Optional[UUID4] = Field(None, description="ID del periodo a analizar")
     incluir_comparativas: bool = Field(
         True, description="Incluir comparativas con periodos anteriores")
     formato: FormatoReporte = Field(FormatoReporte.PDF)
